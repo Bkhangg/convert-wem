@@ -25,7 +25,7 @@ def show_banner():
 
 MENU = f"""
 {C(36,'  +-----------------------------------------------+')}
-{C(36,'  |')}  {C(93,'1')}  Chuyen doi WEM sang Audio                 {C(36,'|')}
+{C(36,'  |')}  {C(93,'1')}  Chuyen doi WEM/BNK sang Audio            {C(36,'|')}
 {C(36,'  |')}  {C(93,'2')}  Gop MP4 + MP3 thanh Video                {C(36,'|')}
 {C(36,'  |')}  {C(93,'3')}  Huong dan                               {C(36,'|')}
 {C(36,'  |')}  {C(93,'0')}  Thoat                                   {C(36,'|')}
@@ -49,6 +49,63 @@ def get_wem_info(path):
         return {"format_tag": fmt_tag, "codec": codec_map.get(fmt_tag, f"Unknown"), "channels": channels, "sample_rate": sample_rate, "file_size": os.path.getsize(path)}
     except:
         return None
+
+
+def parse_bnk(path):
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except:
+        return None
+
+    sections = {}
+    offset = 0
+    while offset + 8 <= len(data):
+        section_id = data[offset:offset+4].decode("ascii", errors="replace")
+        section_len = struct.unpack("<I", data[offset+4:offset+8])[0]
+        if offset + 8 + section_len > len(data):
+            break
+        sections[section_id] = {"data": data[offset+8:offset+8+section_len], "start": offset + 8}
+        offset += 8 + section_len
+        if section_len % 4 != 0:
+            offset += 4 - (section_len % 4)
+
+    if "DIDX" not in sections or "DATA" not in sections:
+        return None
+
+    didx = sections["DIDX"]["data"]
+    data_start = sections["DATA"]["start"]
+    entries = []
+    for i in range(0, len(didx), 12):
+        if i + 12 > len(didx):
+            break
+        wem_id = struct.unpack("<I", didx[i:i+4])[0]
+        wem_off = struct.unpack("<I", didx[i+4:i+8])[0]
+        wem_sz = struct.unpack("<I", didx[i+8:i+12])[0]
+        wem_data = data[data_start + wem_off:data_start + wem_off + wem_sz]
+        entries.append({"id": wem_id, "offset": wem_off, "size": wem_sz, "data": wem_data})
+
+    return {"bank": Path(path).stem, "entries": entries, "count": len(entries)}
+
+
+def extract_bnk(bnk_path, output_dir):
+    bank = parse_bnk(bnk_path)
+    if not bank:
+        err(f"{Path(bnk_path).name}: Invalid BNK")
+        return []
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    extracted = []
+    for entry in bank["entries"]:
+        wem_path = out_dir / f"{entry['id']}.wem"
+        try:
+            with open(wem_path, "wb") as f:
+                f.write(entry["data"])
+            extracted.append(str(wem_path))
+        except:
+            err(f"  Failed to extract WEM {entry['id']}")
+    return extracted
 
 
 def ensure_ww2ogg():
@@ -126,6 +183,45 @@ def ensure_ww2ogg():
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def parse_bnk_name(name):
+    stem = Path(name).stem
+    idx = stem.rfind("_")
+    if idx == -1:
+        return stem, ""
+    return stem[:idx], stem[idx+1:]
+
+
+def convert_wem_file(f, out, fmt, bitrate, keep_ogg, ww2ogg):
+    info_data = get_wem_info(f)
+    if not info_data:
+        err(f"{Path(f).name}: Invalid WEM"); return False
+    name = Path(f).stem
+    info(f"{name} : {info_data['codec']} | {info_data['channels']}ch | {info_data['sample_rate']}Hz | {info_data['file_size']/1024:.1f}KB")
+    try:
+        if info_data["format_tag"] == 0xFFFF:
+            if not ww2ogg:
+                err(f"{name}: SKIPPED - no ww2ogg"); return False
+            t_ogg = tempfile.NamedTemporaryFile(suffix=".ogg", delete=False).name
+            if wem_to_ogg(f, t_ogg, *ww2ogg):
+                if fmt == "ogg":
+                    shutil.move(t_ogg, out)
+                elif ffmpeg_convert(t_ogg, out, fmt, bitrate):
+                    if not keep_ogg: os.unlink(t_ogg)
+                else:
+                    err(f"{name}: Convert failed"); os.unlink(t_ogg); return False
+            else:
+                err(f"{name}: ww2ogg failed"); os.unlink(t_ogg); return False
+        elif ffmpeg_convert(f, out, fmt, bitrate):
+            pass
+        else:
+            err(f"{name}: Convert failed"); return False
+        ok(f"{name}.{fmt} -> {os.path.getsize(out)/1024:.1f}KB")
+        return True
+    except Exception as e:
+        err(f"{name}: {e}")
+        return False
+
+
 def wem_to_ogg(wem, ogg, exe, cb):
     r = subprocess.run([exe, wem, "--pcb", cb, "-o", ogg], capture_output=True, timeout=60)
     return r.returncode == 0 and os.path.exists(ogg)
@@ -139,12 +235,27 @@ def ffmpeg_convert(inp, out, fmt, bitrate="192k"):
 
 
 def convert_wem(in_dir, out_dir, fmt, bitrate, keep_ogg):
-    files = sorted(set(glob.glob(str(Path(in_dir) / "**/*.wem"), recursive=True)))
-    if not files:
-        err(f"No .wem files found in {in_dir}"); return
+    wem_files = sorted(set(glob.glob(str(Path(in_dir) / "**/*.wem"), recursive=True)))
+    bnk_files = sorted(set(glob.glob(str(Path(in_dir) / "**/*.bnk"), recursive=True)))
+
+    if not wem_files and not bnk_files:
+        err(f"No .wem or .bnk files found in {in_dir}"); return
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    needs = any((i := get_wem_info(f)) and i["format_tag"] == 0xFFFF for f in files if os.path.isfile(f))
+
+    # Check ww2ogg needed (BNK files always contain Wwise Vorbis)
+    needs = any((i := get_wem_info(f)) and i["format_tag"] == 0xFFFF for f in wem_files if os.path.isfile(f))
+    if not needs and bnk_files:
+        for b in bnk_files:
+            bank = parse_bnk(b)
+            if bank and bank["entries"]:
+                entry_data = bank["entries"][0]["data"]
+                if len(entry_data) >= 22:
+                    fmt_tag = struct.unpack("<H", entry_data[20:22])[0]
+                    if fmt_tag == 0xFFFF:
+                        needs = True
+                        break
     ww2ogg = None
     if needs:
         is_win = sys.platform.startswith("win")
@@ -154,45 +265,61 @@ def convert_wem(in_dir, out_dir, fmt, bitrate, keep_ogg):
             ww2ogg = (str(exe), str(cb))
         else:
             ww2ogg = ensure_ww2ogg()
-    ok(f"Found {len(files)} WEM file(s)")
+
+    total_wem_count = len(wem_files)
+    total_bnk_count = len(bnk_files)
+    ok(f"Found {total_wem_count} WEM + {total_bnk_count} BNK file(s)")
     dim(f"Input:  {in_dir}")
     dim(f"Output: {out_dir}")
     dim(f"Format: {fmt.upper()}")
     print()
+
     count = 0
-    for f in files:
-        if not os.path.isfile(f): continue
-        info_data = get_wem_info(f)
-        if not info_data:
-            err(f"{Path(f).name}: Invalid WEM"); continue
-        name = Path(f).stem
-        ext = f".{fmt}" if fmt != "mp3" else ".mp3"
-        out = out_dir / f"{name}{ext}"
-        info(f"{name} : {info_data['codec']} | {info_data['channels']}ch | {info_data['sample_rate']}Hz | {info_data['file_size']/1024:.1f}KB")
-        try:
-            if info_data["format_tag"] == 0xFFFF:
-                if not ww2ogg:
-                    err(f"{name}: SKIPPED - no ww2ogg"); continue
-                t_ogg = tempfile.NamedTemporaryFile(suffix=".ogg", delete=False).name
-                if wem_to_ogg(f, t_ogg, *ww2ogg):
-                    if fmt == "ogg":
-                        shutil.move(t_ogg, out)
-                    elif ffmpeg_convert(t_ogg, out, fmt, bitrate):
-                        if not keep_ogg: os.unlink(t_ogg)
-                    else:
-                        err(f"{name}: Convert failed"); os.unlink(t_ogg); continue
-                else:
-                    err(f"{name}: ww2ogg failed"); os.unlink(t_ogg); continue
-            elif ffmpeg_convert(f, out, fmt, bitrate):
-                pass
+
+    # Process standalone .wem files -> out_dir directly
+    if wem_files:
+        dim("--- Standalone .wem files ---")
+        for f in wem_files:
+            if not os.path.isfile(f): continue
+            name = Path(f).stem
+            ext = f".{fmt}" if fmt != "mp3" else ".mp3"
+            out = out_dir / f"{name}{ext}"
+            if convert_wem_file(f, out, fmt, bitrate, keep_ogg, ww2ogg):
+                count += 1
+        print()
+
+    # Process .bnk files -> out_dir / base_name / suffix /
+    if bnk_files:
+        dim("--- BNK files (organized output) ---")
+        for b in bnk_files:
+            base_name, suffix = parse_bnk_name(b)
+            if suffix:
+                organized_dir = out_dir / base_name / suffix
             else:
-                err(f"{name}: Convert failed"); continue
-            ok(f"{name}.{fmt} -> {os.path.getsize(out)/1024:.1f}KB")
-            count += 1
-        except Exception as e:
-            err(f"{name}: {e}")
+                organized_dir = out_dir / base_name
+            organized_dir.mkdir(parents=True, exist_ok=True)
+
+            info(f"Extracting: {Path(b).name} -> {base_name}/{suffix}")
+            extracted = extract_bnk(b, organized_dir)
+            if not extracted:
+                continue
+
+            ok(f"  Extracted {len(extracted)} WEM(s)")
+            bnk_count = 0
+            for w in extracted:
+                if not os.path.isfile(w): continue
+                name = Path(w).stem
+                ext = f".{fmt}" if fmt != "mp3" else ".mp3"
+                out = organized_dir / f"{name}{ext}"
+                if convert_wem_file(w, out, fmt, bitrate, keep_ogg, ww2ogg):
+                    bnk_count += 1
+                os.unlink(w)
+            count += bnk_count
+            ok(f"  Converted {bnk_count}/{len(extracted)} WEM(s) from {Path(b).name}")
+            print()
+
     print()
-    ok(f"Converted {count}/{len(files)} file(s)")
+    ok(f"Converted {count} file(s) total")
 
 
 def merge_video(video, audio, output):
@@ -223,10 +350,10 @@ def merge_video(video, audio, output):
 def menu_convert():
     clear()
     show_banner()
-    print(C(93,"  CONVERT WEM TO AUDIO"))
+    print(C(93,"  CONVERT WEM/BNK TO AUDIO"))
     print("  " + "=" * 40)
     default_in = os.getcwd()
-    inp = input(f"\n  {C(36,'?')} WEM folder [{default_in}]: ").strip()
+    inp = input(f"\n  {C(36,'?')} WEM/BNK folder [{default_in}]: ").strip()
     in_dir = inp if inp else default_in
     default_out = str(Path(in_dir) / "convert")
     out = input(f"  {C(36,'?')} Output folder [{default_out}]: ").strip()
@@ -265,10 +392,11 @@ def menu_help():
     - ffmpeg (pkg install ffmpeg)
     - python 3
 
-  WEM -> Audio:
-    - Put all .wem files in a folder
-    - Select that folder when prompted
+  WEM/BNK -> Audio:
+    - Put all .wem or .bnk files in a folder
+    - BNK (Wwise SoundBank) will be extracted automatically
     - Output goes to <folder>/convert/
+    - BNK output organized: Hero_X_SFX.bnk -> Hero_X/SFX/*.mp3
 
   MP4 + MP3 -> Video:
     - Requires 1 video file (.mp4) and 1 audio file (.mp3)
@@ -278,6 +406,12 @@ def menu_help():
   CLI mode (no menu):
     python convert-wem.py -wem <folder> -f mp3
     python convert-wem.py -merge video.mp4 audio.mp3
+
+  BNK support:
+    - .bnk (Wwise SoundBank) files are detected automatically
+    - WEM files inside BNK are extracted and converted
+    - Output organized by filename: <base>_<suffix>.bnk -> <base>/<suffix>/
+    - Example: Hero_X_Skin_001_SFX.bnk -> Hero_X_Skin_001/SFX/*.mp3
 """)
     input(f"  {C(90,'Press Enter...')}")
 
@@ -286,7 +420,7 @@ def menu_help():
 def cli_mode():
     import argparse
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("-wem", type=str, help="Convert WEM from folder")
+    parser.add_argument("-wem", type=str, help="Convert WEM/BNK from folder")
     parser.add_argument("-f", "--format", default="mp3", choices=["mp3","wav","ogg","flac"])
     parser.add_argument("-b", "--bitrate", default="192k")
     parser.add_argument("-o", "--output", type=str, help="Output directory")
@@ -304,11 +438,12 @@ def cli_mode():
   {C(93,'CLI MODE:')}    python {sys.argv[0]} -wem <folder> -f mp3 -o ./out
           python {sys.argv[0]} -merge video.mp4 audio.mp3
 
-  {C(93,'WEM -> Audio:')}
-    -wem <folder>     Folder containing .wem files
+  {C(93,'WEM/BNK -> Audio:')}
+    -wem <folder>     Folder containing .wem or .bnk files
     -f, --format       Format: mp3, wav, ogg, flac (default: mp3)
     -b, --bitrate      Bitrate (default: 192k)
     -o, --output       Output folder (default: <folder>/convert)
+                      BNK output: <base>_<suffix>.bnk -> <base>/<suffix>/
 
   {C(93,'MP4 + MP3 -> Video:')}
     -merge v.mp4 a.mp3  Merge video and audio
