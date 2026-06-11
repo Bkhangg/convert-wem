@@ -1,0 +1,26 @@
+# Output directories
+convert/
+__pycache__/
+*.pyc
+*.pyo
+
+# Converted audio files
+*.mp3
+*.wav
+*.flac
+*.ogg
+
+# Sample WEM test files
+*.wem
+
+# Tools downloaded at runtime
+tools/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
