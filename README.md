@@ -1,39 +1,39 @@
 # WEM Converter + Video Merger
 
-Convert `.wem` game audio files to MP3/WAV/OGG/FLAC, and merge MP4 video + MP3 audio into a complete video.
+Chuyen doi file am thanh game `.wem` sang MP3/WAV/OGG/FLAC, va gop video MP4 + am thanh MP3 thanh mot video hoan chinh.
 
-## What is WEM?
+## WEM la gi?
 
-`.wem` is an audio format used by **Audiokinetic Wwise**, a popular audio middleware in video games. These files use **Wwise Vorbis** codec (`0xFFFF`) wrapped in a RIFF/WAV container.
+`.wem` la dinh dang am thanh cua **Audiokinetic Wwise** (middleware am thanh pho bien trong game). Cac file nay su dung codec **Wwise Vorbis** (`0xFFFF`) duoc boc trong container RIFF/WAV.
 
-## Features
+## Tinh nang
 
-- **WEM → Audio**: Convert `.wem` to MP3, WAV, OGG, FLAC
-- **Batch processing**: Process entire folders recursively
-- **MP4 + MP3 → Video**: Merge a video file with an audio track
-- **Cross-platform**: Windows (PowerShell + Python), Linux, Termux (Android)
-- **Auto-setup**: Automatically downloads ww2ogg decoder on first run
-- **Two modes**: Interactive menu or CLI one-liners
+- **WEM sang Audio**: Chuyen `.wem` sang MP3, WAV, OGG, FLAC
+- **Xu ly hang loat**: Quet toan bo thu muc con
+- **Gop MP4 + MP3**: Ghep file video voi file am thanh
+- **Da nen tang**: Windows (PowerShell + Python), Linux, Termux (Android)
+- **Tu dong cai dat**: Tai ww2ogg decoder lan chay dau tien
+- **Hai che do**: Menu tuong tac hoac CLI
 
-## How it Works
+## Co che hoat dong
 
 ```
-.wem → [ww2ogg] → .ogg → [ffmpeg] → .mp3/.wav/.flac/.ogg
-.mp4 + .mp3 → [ffmpeg] → .mp4 (merged)
+.wem => [ww2ogg] => .ogg => [ffmpeg] => .mp3/.wav/.flac/.ogg
+.mp4 + .mp3 => [ffmpeg] => .mp4 (da gop)
 ```
 
-| Step | Tool | What it does |
-|------|------|-------------|
-| 1 | `ww2ogg` | Decodes Wwise Vorbis (`.wem`) to standard Ogg Vorbis |
-| 2 | `ffmpeg` | Converts OGG to MP3/WAV/FLAC, or merges MP4+MP3 |
+| Buoc | Cong cu | Chuc nang |
+|------|---------|-----------|
+| 1 | `ww2ogg` | Giai ma Wwise Vorbis (`.wem`) -> Ogg Vorbis chuan |
+| 2 | `ffmpeg` | Chuyen OGG sang MP3/WAV/FLAC, hoac gop MP4+MP3 |
 
-## Requirements
+## Yeu cau
 
-- **Python 3.6+** (Python script)
-- **ffmpeg** (`pkg install ffmpeg` on Termux, `choco install ffmpeg` on Windows)
-- **ww2ogg** (auto-downloaded on first run)
+- **Python 3.6+**
+- **ffmpeg**
+- **ww2ogg** (tu dong tai lan chay dau)
 
-### Platform-specific
+### Cai dat theo tung nen tang
 
 **Termux (Android):**
 ```bash
@@ -41,92 +41,96 @@ pkg update && pkg install ffmpeg python build-essential git
 ```
 
 **Windows:**
-- Install [Python](https://python.org)
-- Install [ffmpeg](https://ffmpeg.org/download.html) and add to PATH
-  - Or: `choco install ffmpeg`
-  - Or: `winget install ffmpeg`
+- Cai [Python](https://python.org)
+- Cai [ffmpeg](https://ffmpeg.org/download.html) va them vao PATH
+  - Hoac: `choco install ffmpeg`
+  - Hoac: `winget install ffmpeg`
 
 **Linux (Ubuntu/Debian):**
 ```bash
 sudo apt install ffmpeg python3 python3-pip build-essential git
 ```
 
-## Usage
+## Su dung
 
-### Menu Mode (Interactive)
+### Che do Menu (tuong tac)
 ```bash
 python convert-wem.py
 ```
 
-Shows a menu with options:
-1. Convert WEM to Audio
-2. Merge MP4 + MP3 to Video
-3. Help
+Menu hien ra:
+1. Chuyen WEM sang Audio
+2. Gop MP4 + MP3 thanh Video
+3. Huong dan
 
-### CLI Mode (One-liners)
+### Che do CLI (mot dong)
 
-**Convert WEM files:**
+**Chuyen file WEM:**
 ```bash
-# Convert all .wem in current folder to MP3 (output: ./convert/)
+# Chuyen tat ca .wem trong thu muc hien tai sang MP3 (xuat ra ./convert/)
 python convert-wem.py -wem .
 
-# Custom folder and format
-python convert-wem.py -wem /path/to/wem/files -f flac
+# Thu muc va dinh dang tuy chinh
+python convert-wem.py -wem /duong/dan/wem -f flac
 
-# Custom bitrate
+# Chinh chat luong
 python convert-wem.py -wem . -f mp3 -b 320k
 
-# Custom output directory
-python convert-wem.py -wem . -o /path/to/output
+# Chon thu muc xuat
+python convert-wem.py -wem . -o /duong/dan/xuat
 
-# All options
+# Tat ca tuy chon
 python convert-wem.py -wem <folder> -f <format> -b <bitrate> -o <output>
 ```
 
-**Merge MP4 + MP3:**
+**Gop MP4 + MP3:**
 ```bash
 python convert-wem.py -merge video.mp4 audio.mp3
 ```
 
-### Command-Line Options
+### Bang tuy chon
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-wem <folder>` | Folder containing .wem files | — |
-| `-f, --format` | Output format: mp3, wav, ogg, flac | `mp3` |
-| `-b, --bitrate` | Audio bitrate (e.g., 192k, 320k) | `192k` |
-| `-o, --output` | Output directory | `<folder>/convert/` |
-| `-merge <v> <a>` | Merge MP4 video + MP3 audio | — |
-| `-h, --help` | Show help | — |
+| Tuy chon | Mo ta | Mac dinh |
+|----------|-------|----------|
+| `-wem <folder>` | Thu muc chua file .wem | — |
+| `-f, --format` | Dinh dang xuat: mp3, wav, ogg, flac | `mp3` |
+| `-b, --bitrate` | Chat luong am thanh (vd: 192k, 320k) | `192k` |
+| `-o, --output` | Thu muc xuat ra | `<folder>/convert/` |
+| `-merge <v> <a>` | Gop video MP4 + audio MP3 | — |
+| `-h, --help` | Huong dan | — |
 
-## PowerShell Script (Windows only)
+## Script PowerShell (Windows)
 
-A PowerShell version is also included for Windows users:
+Phien ban PowerShell danh cho Windows:
 
 ```powershell
 .\Convert-Wem.ps1 -Path *.wem -Format mp3 -Bitrate 192000
 .\Convert-Wem.ps1 -Help
 ```
 
-## How ww2ogg is Installed
+## Cach ww2ogg duoc cai dat
 
-The Python script automatically handles ww2ogg setup:
+Python script tu dong xu ly viec cai ww2ogg:
 
-- **Windows**: Downloads prebuilt `ww2ogg.exe` + codebooks from GitHub releases
-- **Linux/Termux**: Clones source from GitHub and compiles with `g++`
+- **Windows**: Tai `ww2ogg.exe` + codebooks tu GitHub
+- **Linux/Termux**: Clone source tu GitHub va bien dich voi `g++`
 
-Tools are cached in `~/.wemconverter/tools/`.
+Bo cong cu duoc luu tai `~/.wemconverter/tools/`.
 
-## Project Structure
+## Cau truc thu muc
 
 ```
 convert-wem/
-├── convert-wem.py       # Main Python script (cross-platform)
-├── Convert-Wem.ps1      # PowerShell script (Windows)
-├── README.md            # This file
+├── convert-wem.py       # Script chinh (Python, da nen tang)
+├── Convert-Wem.ps1      # Script PowerShell (Windows)
+├── README.md            # File huong dan
 └── .gitignore
 ```
 
-## License
+## Ghi chu
+
+Vi du du lieu WEM trong repo duoc trich xuat tu cac game pho bien chi voi muc dich minh hoa. Vui long ton trong ban quyen noi dung game.
+
+## Giay phep
 
 MIT
